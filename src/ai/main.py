@@ -1,47 +1,70 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from workflow import ai_graph_engine, TicketState
+from fastapi.middleware.cors import CORSMiddleware
 
-# 1. Initialize the FastAPI Application
-app = FastAPI(
-    title="Apex-AI Operations Microservice",
-    description="LangGraph state machine gateway for infrastructure triage.",
-    version="1.0.0"
+# Import our compiled LangGraph engine from the workflow file
+from src.ai.workflow import ai_dispatch_engine
+
+# Initialize the FastAPI application
+app = FastAPI(title="Salesforce AI Dispatch Gateway", version="1.0")
+
+# Allow Express server to talk to this API without security blocks
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# 2. Define the exact JSON structure we expect from the Express.js teammate
-class IncidentRequest(BaseModel):
+# ==========================================
+# 📥 1. DATA CONTRACT (What Express Sends)
+# ==========================================
+class TicketRequest(BaseModel):
     ticketId: int
     description: str
 
-# 3. Create the API Endpoint
-@app.post("/api/ai/triage")
-async def process_incident(request: IncidentRequest):
-    print(f"\n[NETWORK ENTRY] Received HTTP Request for Ticket: {request.ticketId}")
+# ==========================================
+# 🚀 2. THE API ENDPOINT
+# ==========================================
+@app.post("/api/ai/dispatch")
+async def analyze_and_dispatch_ticket(request: TicketRequest):
+    print(f"\n[API Gateway] Received Ticket #{request.ticketId} from Express.js")
     
     try:
-        # Convert the incoming web request into our LangGraph State object
-        input_state = TicketState(
-            ticketId=request.ticketId,
-            description=request.description
-        )
+        # 1. Package the incoming data into the dictionary LangGraph expects
+        initial_state = {
+            "ticketId": request.ticketId,
+            "description": request.description
+        }
         
-        # Trigger the LangGraph Engine
-        final_output = ai_graph_engine.invoke(input_state)
+        # 2. Fire the LangGraph Engine (This runs the workflow.py file!)
+        print("[API Gateway] Handing off to LangGraph AI Engine...")
+        final_state = ai_dispatch_engine.invoke(initial_state)
         
-        # Return the structured payload back across the network
-        return {
+        # 3. Format the final JSON response to send back to Express
+        response_payload = {
             "success": True,
-            "message": "Incident successfully processed via LangGraph.",
-            "payload": {
-                "category": final_output['category'],
-                "priority": final_output['priority'],
-                "summary": final_output['aiSummary'],
-                "isAutoFixable": final_output['isAutoFixable'],
-                "suggestedFix": final_output['suggestedFix']
+            "message": "AI Dispatch routing complete.",
+            "data": {
+                "ticketId": final_state.get("ticketId"),
+                "category": final_state.get("category"),
+                "priority": final_state.get("priority"),
+                "summary": final_state.get("summary"),
+                "assigned_team": final_state.get("assigned_team"),
+                "requires_hardware_dispatch": final_state.get("requires_hardware_dispatch")
             }
         }
         
+        print(f"[API Gateway] Returning structured payload for Ticket #{request.ticketId}")
+        return response_payload
+        
     except Exception as e:
-        print(f"[CRITICAL ERROR] {str(e)}")
+        print(f"[API Gateway ERROR] {str(e)}")
+        # If anything crashes, return a clean 500 error instead of killing the server
         raise HTTPException(status_code=500, detail="Internal AI Engine Failure")
+
+# Basic health check endpoint
+@app.get("/")
+def health_check():
+    return {"status": "AI Dispatch Microservice is Online"}
