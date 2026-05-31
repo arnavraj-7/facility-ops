@@ -14,6 +14,7 @@ import { globalLimiter } from './middlewares/rateLimit.js';
 import { sessionMiddleware } from './middlewares/session.js';
 import userRoutes from './routes/userRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import ticketRoutes from './routes/ticketRoutes.js';
 
 
 const app = express();
@@ -51,7 +52,7 @@ app.get('/health', (req, res) => {
 });
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/auth', authRoutes);
-
+app.use('/api/v1/tickets', ticketRoutes);
 
 // Fallbacks and Errors
 app.use(notFound)
