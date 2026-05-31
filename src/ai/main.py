@@ -7,7 +7,7 @@ import uuid
 from src.ai.workflow import ai_dispatch_engine
 
 # Initialize the FastAPI application
-app = FastAPI(title="Salesforce AI Dispatch Gateway", version="1.0")
+app = FastAPI(title="AI Dispatch Gateway", version="1.0")
 
 # Allow your teammate's Express server to connect seamlessly
 app.add_middleware(
