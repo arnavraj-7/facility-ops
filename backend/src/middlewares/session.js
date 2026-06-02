@@ -6,6 +6,9 @@ import { env, isProd } from '../config/env.js';
 
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
+// Secure cookies follow NODE_ENV unless COOKIE_SECURE explicitly overrides it.
+const secureCookie = env.COOKIE_SECURE ?? isProd;
+
 export const sessionMiddleware = session({
   name: 'sid', // (security by obscurity)
   secret: env.SESSION_SECRET,
@@ -22,9 +25,12 @@ export const sessionMiddleware = session({
 
   cookie: {
     httpOnly: true, // CRITICAL: Prevents XSS attacks from reading the cookie
-    secure: isProd, // True in production (HTTPS)
-    sameSite: 'none', // Defends against CSRF attacks
-    maxAge: SESSION_TTL_SECONDS * 1000, 
+    secure: secureCookie,
+    // SameSite=None requires Secure (and a browser rejects it over plain http),
+    // so only use it for genuinely cross-site secure setups. Same-origin
+    // deployments (Vite dev proxy, nginx) work correctly with 'lax'.
+    sameSite: secureCookie ? 'none' : 'lax',
+    maxAge: SESSION_TTL_SECONDS * 1000,
     path: '/',
   },
 });

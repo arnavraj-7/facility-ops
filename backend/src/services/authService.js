@@ -1,6 +1,7 @@
 // src/services/authService.js
 import bcrypt from 'bcrypt';
 import User from '../models/User.js';
+import Tenant from '../models/Tenant.js';
 import AppError from '../utils/AppError.js';
 import { sendMail } from '../lib/mailer.js';
 
@@ -8,25 +9,75 @@ const BCRYPT_COST = 12;
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
-export const signup = async ({ email, password, name }) => {
+const slugify = (s) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'facility';
+
+/** Build a tenant slug that is guaranteed unique by suffixing if needed. */
+const uniqueSlug = async (base) => {
+  let slug = slugify(base);
+  let n = 1;
+  while (await Tenant.exists({ slug })) slug = `${slugify(base)}-${n++}`;
+  return slug;
+};
+
+/**
+ * A new signup provisions a brand-new tenant and the signer becomes its admin.
+ * Additional team members are created by that admin (see createMember).
+ */
+export const signup = async ({ email, password, name, organization }) => {
   const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+
+  const orgName = organization || `${name}'s Facility`;
+  const tenant = await Tenant.create({ name: orgName, slug: await uniqueSlug(orgName) });
 
   let user;
   try {
-    user = await User.create({ email, passwordHash, name });
+    user = await User.create({
+      email,
+      passwordHash,
+      name,
+      tenantId: tenant._id,
+      role: 'admin', // founder of a new tenant
+    });
   } catch (err) {
-    throw err; 
+    // Roll back the orphan tenant if user creation fails (e.g. duplicate email).
+    await Tenant.deleteOne({ _id: tenant._id }).catch(() => {});
+    throw err;
   }
 
-  // Fire-and-forget email 
   sendMail({
     to: user.email,
-    subject: 'Welcome to FacilityOps',
-    text: `Hi ${user.name}, your account is ready.`,
+    subject: 'Welcome to Facility Ops Hub',
+    text: `Hi ${user.name}, your facility "${tenant.name}" is ready.`,
+  }).catch(() => {});
+
+  return { ...user.toJSON(), tenant: tenant.toJSON() };
+};
+
+/** Admin-only: add a team member to the admin's own tenant. */
+export const createMember = async ({ admin, email, password, name, role, team }) => {
+  const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+  const user = await User.create({
+    email,
+    passwordHash,
+    name,
+    role,
+    team: team || null,
+    tenantId: admin.tenantId,
+  });
+
+  sendMail({
+    to: email,
+    subject: 'You have been added to Facility Ops Hub',
+    text: `Hi ${name}, an account was created for you as ${role}. Password: ${password}`,
   }).catch(() => {});
 
   return user.toJSON();
-}
+};
 
 export const login = async ({ email, password }) => {
   const user = await User.findActiveByEmail(email).select('+passwordHash');

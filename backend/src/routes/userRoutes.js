@@ -1,31 +1,17 @@
 import { Router } from 'express';
-import { getUsers, getUserById } from '../controllers/userController.js';
+import { getUsers, getEngineers, getUserById, createMember } from '../controllers/userController.js';
+import { requireAuth } from '../middlewares/requireAuth.js';
+import { requireRole } from '../middlewares/requireRole.js';
 import { validate } from '../middlewares/validate.js';
+import { createMemberSchema } from '../schemas/authSchema.js';
+
 const router = Router();
 
-router.get('/session-test', (req, res) => {
-  // Check if this user already has a 'views' counter in their session
-  if (req.session.views) {
-    req.session.views++; // Increment it!
-    res.status(200).json({
-      status: 'success',
-      message: `Welcome back! You have visited this route ${req.session.views} times.`,
-      sessionId: req.session.id // The unique ID stored in Redis
-    });
-  } else {
-    // First time visitor! Set the counter to 1.
-    req.session.views = 1;
-    res.status(200).json({
-      status: 'success',
-      message: 'Welcome for the first time! A new session was just created in Redis.',
-      sessionId: req.session.id
-    });
-  }
-});
-router.get('/', getUsers);
+router.use(requireAuth);
 
-router.get('/:id', getUserById);
-
-
+router.get('/engineers', requireRole('manager', 'admin'), getEngineers);
+router.get('/', requireRole('manager', 'admin'), getUsers);
+router.post('/', requireRole('admin'), validate({ body: createMemberSchema }), createMember);
+router.get('/:id', requireRole('manager', 'admin'), getUserById);
 
 export default router;

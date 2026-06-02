@@ -1,6 +1,7 @@
 import * as authService from '../services/authService.js';
 import AppError from '../utils/AppError.js';
 import { redis } from '../lib/redis.js';
+import Tenant from '../models/Tenant.js';
 
 export const signup = async (req, res) => {
   const user = await authService.signup(req.validated.body);
@@ -30,7 +31,13 @@ export const login = async (req, res, next) => {
 }
 
 export const me = async (req, res) => {
-  res.json({ user: req.user });
+  const tenant = await Tenant.findById(req.user.tenantId).lean();
+  // req.user is a lean object (has _id, not id) — expose `id` for the client.
+  const { _id, ...rest } = req.user;
+  res.json({
+    user: { id: _id, ...rest },
+    tenant: tenant ? { id: tenant._id, name: tenant.name, slug: tenant.slug } : null,
+  });
 }
 
 export const logout = async (req, res, next) => {
