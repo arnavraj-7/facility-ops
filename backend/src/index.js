@@ -5,6 +5,8 @@ import { env } from './config/env.js';
 import { connectDB } from './lib/db.js';
 import { connectRedis, disconnectRedis } from './lib/redis.js';
 import logger from './lib/logger.js';
+import { startHeartbeat } from './realtime/sse.js';
+import { startSlaWorker } from './workers/slaWorker.js';
 
 const startServer = async () => {
   try {
@@ -17,6 +19,10 @@ const startServer = async () => {
     server.listen(env.PORT, () => {
       logger.info(`Server listening on port ${env.PORT} in ${env.NODE_ENV} mode`);
     });
+
+    // Background services
+    startHeartbeat(); // keep SSE connections alive through proxies
+    startSlaWorker(); // periodically flag SLA breaches
 
     //  Graceful Shutdown Management 
     const SHUTDOWN_TIMEOUT_MS = 15000;
