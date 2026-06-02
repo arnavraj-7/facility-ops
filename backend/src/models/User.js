@@ -4,6 +4,14 @@ const { Schema } = mongoose;
 
 const UserSchema = new Schema(
   {
+    // --- Multi-tenancy: every user belongs to exactly one facility/org ---
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Tenant',
+      required: true,
+      index: true,
+    },
+
     email: {
       type: String,
       required: true,
@@ -22,12 +30,19 @@ const UserSchema = new Schema(
 
     name: { type: String, required: true, trim: true, maxLength: 100 },
 
+    // user      = ranger / requester who raises issues
+    // engineer  = fixes assigned tickets
+    // manager   = assigns, approves AI routing, sees analytics
+    // admin     = full control over the tenant
     role: {
       type: String,
-      enum: ['user', 'admin'],
+      enum: ['user', 'engineer', 'manager', 'admin'],
       default: 'user',
       index: true,
     },
+
+    // Optional grouping for engineers (maps to AI assignedTeam labels)
+    team: { type: String, default: null, trim: true },
     status: {
       type: String,
       enum: ['active', 'suspended', 'deleted'],
@@ -64,6 +79,8 @@ const UserSchema = new Schema(
 
 UserSchema.index({ email: 1, deletedAt: 1 });
 UserSchema.index({ createdAt: -1 });
+// Common dashboard query: list engineers within a tenant
+UserSchema.index({ tenantId: 1, role: 1, deletedAt: 1 });
 
 UserSchema.virtual('isLocked').get(function () {
   return this.lockedUntil && this.lockedUntil > new Date();
