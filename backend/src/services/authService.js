@@ -3,7 +3,6 @@ import bcrypt from 'bcrypt';
 import User from '../models/User.js';
 import Tenant from '../models/Tenant.js';
 import AppError from '../utils/AppError.js';
-import { sendMail } from '../lib/mailer.js';
 
 const BCRYPT_COST = 12;
 const MAX_FAILED_ATTEMPTS = 5;
@@ -27,8 +26,17 @@ const uniqueSlug = async (base) => {
 /**
  * A new signup provisions a brand-new tenant and the signer becomes its admin.
  * Additional team members are created by that admin (see createMember).
+ *
+ * There is no email-verification step: the account is active immediately and
+ * the controller signs the user straight in.
  */
 export const signup = async ({ email, password, name, organization }) => {
+  // Check up front so the caller gets a clean 409 instead of a raw duplicate
+  // key error (the unique index below is still the real guarantee).
+  if (await User.exists({ email })) {
+    throw AppError.conflict('That email is already registered', 'EMAIL_TAKEN');
+  }
+
   const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
 
   const orgName = organization || `${name}'s Facility`;
@@ -49,17 +57,19 @@ export const signup = async ({ email, password, name, organization }) => {
     throw err;
   }
 
-  sendMail({
-    to: user.email,
-    subject: 'Welcome to Facility Ops Hub',
-    text: `Hi ${user.name}, your facility "${tenant.name}" is ready.`,
-  }).catch(() => {});
-
   return { ...user.toJSON(), tenant: tenant.toJSON() };
 };
 
-/** Admin-only: add a team member to the admin's own tenant. */
+/**
+ * Admin-only: add a team member to the admin's own tenant. The admin sets the
+ * starting password and hands it over directly — no invite email, no
+ * activation link, no verification.
+ */
 export const createMember = async ({ admin, email, password, name, role, team }) => {
+  if (await User.exists({ email: email.toLowerCase() })) {
+    throw AppError.conflict('That email is already registered', 'EMAIL_TAKEN');
+  }
+
   const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
   const user = await User.create({
     email,
@@ -69,12 +79,6 @@ export const createMember = async ({ admin, email, password, name, role, team })
     team: team || null,
     tenantId: admin.tenantId,
   });
-
-  sendMail({
-    to: email,
-    subject: 'You have been added to Facility Ops Hub',
-    text: `Hi ${name}, an account was created for you as ${role}. Password: ${password}`,
-  }).catch(() => {});
 
   return user.toJSON();
 };

@@ -39,7 +39,7 @@ const checkBreaches = async () => {
       title: `SLA breached: #${ticket.ticketNumber}`,
       body: `${ticket.title} (${ticket.priority}) missed its resolution SLA.`,
       ticketId: ticket._id,
-      email: true,
+      alert: true,
     });
     if (ticket.assignedEngineer) {
       await notifyUser({
@@ -49,7 +49,7 @@ const checkBreaches = async () => {
         title: `SLA breached: #${ticket.ticketNumber}`,
         body: ticket.title,
         ticketId: ticket._id,
-        email: true,
+        alert: true,
       });
     }
   }

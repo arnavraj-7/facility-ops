@@ -41,9 +41,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await qc.invalidateQueries({ queryKey: ['me'] });
   };
 
+  // Signup creates the tenant AND opens the session in one round-trip — there
+  // is no email-verification step to wait on.
   const signup: AuthContextValue['signup'] = async (input) => {
     await api.post('/auth/signup', input);
-    await api.post('/auth/login', { email: input.email, password: input.password });
     await qc.invalidateQueries({ queryKey: ['me'] });
   };
 
