@@ -17,6 +17,23 @@ const normalize = (err) => {
   if (err.type === 'entity.parse.failed') return AppError.badRequest('Invalid JSON body', 'BAD_JSON');
   if (err.type === 'entity.too.large') return AppError.badRequest('Payload too large', 'PAYLOAD_TOO_LARGE');
 
+  // Mongo duplicate key (e.g. two signups racing on the same email)
+  if (err.code === 11000) {
+    const field = Object.keys(err.keyPattern || {})[0] || 'value';
+    return AppError.conflict(`That ${field} is already taken`, 'DUPLICATE_KEY');
+  }
+
+  // Mongoose schema validation / bad ObjectId — a client mistake, not a bug
+  if (err.name === 'ValidationError') {
+    const issues = Object.fromEntries(
+      Object.entries(err.errors || {}).map(([k, v]) => [k, [v.message]])
+    );
+    return AppError.badRequest('Validation failed', 'VALIDATION_ERROR', { issues });
+  }
+  if (err.name === 'CastError') {
+    return AppError.badRequest(`Invalid value for "${err.path}"`, 'INVALID_ID');
+  }
+
   // Handle CORS rejection
   if (err.message?.startsWith('CORS:')) return AppError.forbidden('Origin not allowed', 'CORS_REJECTED');
 
