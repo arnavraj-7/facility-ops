@@ -19,7 +19,12 @@ const TIMEOUT_MS = 6_000;
  */
 export const heuristicRoute = (description = '') => {
   const text = description.toLowerCase();
-  const has = (...words) => words.some((w) => text.includes(w));
+
+  // Match whole words (with common suffixes) rather than raw substrings.
+  // Plain `includes` produces bad triage: "misfires" contains "fire" and
+  // "shutdown" contains "down", so half the tickets came out critical.
+  const has = (...words) =>
+    words.some((w) => new RegExp(`\\b${w}(s|es|ed|ing)?\\b`).test(text));
 
   let category = 'General';
   let assigned_team = 'Core_Platform_Engineers';
