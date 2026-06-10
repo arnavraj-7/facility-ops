@@ -20,9 +20,13 @@ export function UserMenu() {
   if (!user) return null;
 
   const onLogout = async () => {
-    await logout();
-    toast.success('Signed out');
-    navigate('/login');
+    try {
+      await logout();
+      toast.success('Signed out');
+    } finally {
+      // `replace` so the back button can't return to the authenticated shell.
+      navigate('/login', { replace: true });
+    }
   };
 
   return (
