@@ -22,9 +22,40 @@ export const authLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: {
-    error: { 
-      code: 'AUTH_RATE_LIMITED', 
-      message: 'Too many authentication attempts. Please try again in 15 minutes.' 
+    error: {
+      code: 'AUTH_RATE_LIMITED',
+      message: 'Too many authentication attempts. Please try again in 15 minutes.'
+    },
+  },
+});
+
+// 3. OTP Limiter: guards a 6-digit secret, so it is tighter than login.
+// The per-challenge attempt cap (5) is the primary defence; this stops an
+// attacker cycling through fresh challenges to get unlimited guesses.
+export const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'OTP_RATE_LIMITED',
+      message: 'Too many verification attempts. Please sign in again shortly.',
+    },
+  },
+});
+
+// 4. Password-reset Limiter: stops the recovery endpoint being used to spam
+// a mailbox, or to probe which addresses are registered.
+export const resetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'RESET_RATE_LIMITED',
+      message: 'Too many password reset requests. Please try again later.',
     },
   },
 });

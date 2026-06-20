@@ -15,6 +15,31 @@ const EnvSchema = z.object({
   MONGO_URI: z.string().min(1, 'MONGO_URI is required'),
   CORS_ORIGIN: z.string().url().optional(),
   SESSION_SECRET: z.string().min(32, 'Session secret must be at least 32 chars'),
+  SESSION_TTL_DAYS: z.coerce.number().int().positive().default(7),
+
+  // ── Concurrent session limiting ────────────────────────────────────────
+  // How many devices may be signed in at once. Exceeding it evicts the
+  // least-recently-used session (Amazon Prime / Netflix behaviour).
+  MAX_CONCURRENT_SESSIONS: z.coerce.number().int().positive().default(3),
+
+  // ── Risk-Based Authentication ──────────────────────────────────────────
+  // Combined risk score at or above which a step-up email OTP is required.
+  // Weights live in lib/risk.js: new device 40, new country 35,
+  // impossible travel 100, dormant account 15.
+  RBA_STEP_UP_THRESHOLD: z.coerce.number().int().positive().default(70),
+  OTP_TTL_MINUTES: z.coerce.number().int().positive().default(10),
+
+  // IP geolocation for the risk engine. Private/loopback IPs short-circuit so
+  // a local demo never makes a network call, and any failure degrades to
+  // "unknown" rather than blocking a login.
+  GEO_LOOKUP_ENABLED: bool('true'),
+  GEO_PROVIDER_URL: z
+    .string()
+    .default('http://ip-api.com/json/{ip}?fields=status,countryCode,city,lat,lon'),
+  GEO_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
+
+  // ── Account recovery ───────────────────────────────────────────────────
+  RESET_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().default(30),
 
   // ── Session store ──────────────────────────────────────────────────────
   // Redis is the production session store. When it is unreachable (or

@@ -25,6 +25,26 @@ export const loginSchema = z
   })
   .strict();
 
+// Step-up verification after a risk-flagged login.
+export const verifyOtpSchema = z
+  .object({
+    challengeId: z.string().min(10).max(200),
+    code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+  })
+  .strict();
+
+// Account recovery.
+export const forgotPasswordSchema = z
+  .object({ email: z.string().email().toLowerCase().trim() })
+  .strict();
+
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().min(20).max(200),
+    password: passwordSchema,
+  })
+  .strict();
+
 // Admin creates a team member (engineer / manager / user) inside their tenant.
 export const createMemberSchema = z
   .object({
