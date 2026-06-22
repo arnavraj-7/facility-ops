@@ -165,6 +165,43 @@ export function useCreateMember() {
   });
 }
 
+// ---- Sessions / devices ----
+export interface ActiveSession {
+  id: string;
+  deviceLabel: string;
+  ip: string;
+  location: string;
+  lastSeenAt: string;
+  createdAt: string;
+  stepUpVerified: boolean;
+  current: boolean;
+}
+
+export function useSessions() {
+  return useQuery({
+    queryKey: ['sessions'],
+    queryFn: async () =>
+      (await api.get<{ sessions: ActiveSession[]; max: number }>('/auth/sessions')).data,
+  });
+}
+
+export function useRevokeSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => api.delete(`/auth/sessions/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sessions'] }),
+  });
+}
+
+export function useRevokeOtherSessions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      (await api.post<{ revoked: number }>('/auth/sessions/revoke-others')).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sessions'] }),
+  });
+}
+
 // ---- Notifications ----
 export function useNotifications() {
   return useQuery({
