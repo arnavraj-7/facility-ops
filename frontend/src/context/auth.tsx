@@ -8,11 +8,29 @@ interface MeResponse {
   tenant: Tenant | null;
 }
 
+/**
+ * A risk-flagged login does not produce a session. The API returns a challenge
+ * the user must clear with an emailed one-time code.
+ */
+export interface StepUpChallenge {
+  stepUpRequired: true;
+  challengeId: string;
+  reason: string;
+  riskScore: number;
+  riskReasons: string[];
+  maskedEmail: string;
+  detail?: Record<string, unknown>;
+  devCode?: string; // development convenience only
+}
+
+type LoginResult = { ok: true } | StepUpChallenge;
+
 interface AuthContextValue {
   user: User | null;
   tenant: Tenant | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  verifyOtp: (challengeId: string, code: string) => Promise<void>;
   signup: (input: { name: string; email: string; password: string; organization?: string }) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -36,8 +54,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     retry: false,
   });
 
-  const login = async (email: string, password: string) => {
-    await api.post('/auth/login', { email, password });
+  const login: AuthContextValue['login'] = async (email, password) => {
+    const res = await api.post<{ stepUpRequired?: boolean } & Partial<StepUpChallenge>>(
+      '/auth/login',
+      { email, password }
+    );
+
+    // Correct password, but the risk engine wants a second factor. No session
+    // exists yet — hand the challenge back for the caller to complete.
+    if (res.data.stepUpRequired) return res.data as StepUpChallenge;
+
+    await qc.invalidateQueries({ queryKey: ['me'] });
+    return { ok: true };
+  };
+
+  const verifyOtp: AuthContextValue['verifyOtp'] = async (challengeId, code) => {
+    await api.post('/auth/verify-otp', { challengeId, code });
     await qc.invalidateQueries({ queryKey: ['me'] });
   };
 
@@ -77,6 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     tenant: data?.tenant ?? null,
     isLoading,
     login,
+    verifyOtp,
     signup,
     logout,
   };

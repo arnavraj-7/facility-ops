@@ -6,8 +6,16 @@ A multi-role facility management platform — raise issues, auto-triage and rout
 
 ## Features
 
+**Authentication & security**
+- 🔐 Stateful session auth (Express + Redis) with four roles — `user`, `engineer`, `manager`, `admin`
+- 📱 Concurrent session limiting — max 3 devices, least-recently-used evicted on the 4th sign-in, with automatic garbage collection of orphaned sessions
+- 🛡️ Risk-Based Authentication — device fingerprinting and IP geolocation score every login; new device, new country, impossible travel and dormant accounts raise the score
+- ✉️ Step-up email OTP when a login crosses the risk threshold — crypto-random codes, stored only as hashes, verified with `timingSafeEqual`
+- 🔑 Account recovery with 256-bit `randomBytes` tokens, stored hashed, single-use, timing-safe comparison, and full session revocation on reset
+- 💻 "Your devices" screen — see every active session with device, location and last-seen; revoke individually or all at once
+- 🚫 No email verification on signup: an account works the moment it is created
+
 **Core**
-- 🔐 Session auth (Redis-backed) with four roles — `user`, `engineer`, `manager`, `admin`. No email verification: an account works the moment it is created.
 - 🏢 Multi-tenancy — every user & ticket is scoped to a facility; signup provisions a new tenant and signs you straight in
 - 🎫 Raise issues with automatic triage (priority, category, team, hardware-dispatch flag)
 - 👷 Assign engineers; role-scoped boards (requesters see their own, engineers their queue, managers everything)
@@ -88,6 +96,22 @@ The Vite dev server proxies `/api` to the backend, so the session cookie is same
 | `billy@facility.dev` | engineer | Their assigned queue |
 | `ranger@facility.dev` | user | Only the issues they raised |
 
+### Trying the security features locally
+
+Every request from a laptop arrives from `127.0.0.1`, which carries no location. Outside production the API accepts an `X-Demo-IP` header so the risk engine can be exercised properly:
+
+```bash
+# sign in from the US...
+curl -i -X POST localhost:9000/api/v1/auth/login -H 'Content-Type: application/json' \
+  -H 'X-Demo-IP: 8.8.8.8' -d '{"email":"manager@facility.dev","password":"Password123"}'
+
+# ...then from India seconds later — impossible travel, step-up required
+curl -i -X POST localhost:9000/api/v1/auth/login -H 'Content-Type: application/json' \
+  -H 'X-Demo-IP: 49.44.112.1' -d '{"email":"manager@facility.dev","password":"Password123"}'
+```
+
+The second call returns `stepUpRequired: true` with the computed travel speed instead of a session. Outside production the OTP is also returned as `devCode` (and logged), so the flow is demoable without a mail server. Sign in on four different browsers to watch the concurrent-device limit evict the oldest — visible on the **Security** page.
+
 ### Optional: Gemini triage service
 
 Off by default — the backend runs a built-in keyword triage engine in-process, so every feature works without Python or an API key.
@@ -107,7 +131,12 @@ All under `/api/v1`. Auth is a session cookie (`credentials: include`).
 | Method | Path | Role | Purpose |
 |---|---|---|---|
 | POST | `/auth/signup` | public | Create a tenant + admin, and log in |
-| POST | `/auth/login` `/auth/logout` | public | Session login/logout |
+| POST | `/auth/login` `/auth/logout` | public | Session login/logout (login may return a step-up challenge) |
+| POST | `/auth/verify-otp` | public | Complete a step-up challenge and open the session |
+| POST | `/auth/forgot-password` `/auth/reset-password` | public | Account recovery |
+| GET | `/auth/sessions` | auth | Active devices for the current user |
+| DELETE | `/auth/sessions/:id` | auth | Revoke one device |
+| POST | `/auth/sessions/revoke-others` | auth | Sign out everywhere else |
 | GET | `/auth/me` | auth | Current user + tenant |
 | POST | `/tickets` | auth | Raise an issue (auto-triage) |
 | GET | `/tickets` | auth | List (filters, search, pagination, role-scoped) |

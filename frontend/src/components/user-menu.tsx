@@ -1,4 +1,4 @@
-import { LogOut } from 'lucide-react';
+import { LogOut, ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -47,6 +47,9 @@ export function UserMenu() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => navigate('/security')}>
+          <ShieldCheck className="h-4 w-4" /> Security &amp; devices
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={onLogout}>
           <LogOut className="h-4 w-4" /> Sign out
         </DropdownMenuItem>

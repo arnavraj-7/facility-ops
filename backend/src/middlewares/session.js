@@ -5,10 +5,20 @@ import { redis } from '../lib/redis.js';
 import { env, isProd } from '../config/env.js';
 import logger from '../lib/logger.js';
 
-const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const SESSION_TTL_SECONDS = env.SESSION_TTL_DAYS * 24 * 60 * 60;
+
+/** Key prefix for session records in Redis — shared with sessionService. */
+export const SESSION_PREFIX = 'sess:';
 
 // Secure cookies follow NODE_ENV unless COOKIE_SECURE explicitly overrides it.
 const secureCookie = env.COOKIE_SECURE ?? isProd;
+
+// The live store instance, so other modules can check whether a given session
+// still exists and destroy sessions belonging to *other* devices.
+let store = null;
+
+/** The active express-session store (Redis or MemoryStore). */
+export const sessionStore = () => store;
 
 /**
  * Build the express-session middleware against whichever store is available.
@@ -22,17 +32,19 @@ const build = (useRedis) => {
     logger.warn('Session store: in-memory (single process only, cleared on restart)');
   }
 
+  store = useRedis
+    ? new RedisStore({
+        client: redis,
+        prefix: SESSION_PREFIX, // Keys look like "sess:12345abcde"
+        ttl: SESSION_TTL_SECONDS,
+      })
+    : new session.MemoryStore();
+
   return session({
     name: 'sid', // (security by obscurity)
     secret: env.SESSION_SECRET,
 
-    store: useRedis
-      ? new RedisStore({
-          client: redis,
-          prefix: 'sess:', // Keys will look like "sess:12345abcde"
-          ttl: SESSION_TTL_SECONDS,
-        })
-      : undefined, // express-session's MemoryStore
+    store,
 
     resave: false, // Don't burn store writes if the session hasn't changed
     saveUninitialized: false, // Don't create empty sessions for anonymous visitors

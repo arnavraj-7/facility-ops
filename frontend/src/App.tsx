@@ -5,6 +5,9 @@ import type { Role } from '@/types';
 import { AppLayout } from '@/components/app-layout';
 import { LoginPage } from '@/pages/login';
 import { SignupPage } from '@/pages/signup';
+import { ForgotPasswordPage } from '@/pages/forgot-password';
+import { ResetPasswordPage } from '@/pages/reset-password';
+import { SecurityPage } from '@/pages/security';
 import { DashboardPage } from '@/pages/dashboard';
 import { TicketsPage } from '@/pages/tickets';
 import { TicketDetailPage } from '@/pages/ticket-detail';
@@ -40,6 +43,13 @@ export default function App() {
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route path="/signup" element={user ? <Navigate to="/" replace /> : <SignupPage />} />
 
+      {/* Account recovery stays reachable while signed out. */}
+      <Route
+        path="/forgot-password"
+        element={user ? <Navigate to="/" replace /> : <ForgotPasswordPage />}
+      />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+
       <Route
         element={
           <RequireAuth>
@@ -48,6 +58,7 @@ export default function App() {
         }
       >
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/security" element={<SecurityPage />} />
         <Route path="/tickets" element={<TicketsPage />} />
         <Route path="/tickets/:id" element={<TicketDetailPage />} />
         <Route

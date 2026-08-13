@@ -17,6 +17,8 @@ import Ticket from '../models/Ticket.js';
 import Comment from '../models/Comment.js';
 import Notification from '../models/Notification.js';
 import Counter from '../models/Counter.js';
+import UserSession from '../models/UserSession.js';
+import PasswordReset from '../models/PasswordReset.js';
 import { computeSlaDueAt } from '../lib/sla.js';
 import { heuristicRoute } from '../services/aiClient.js';
 
@@ -32,7 +34,15 @@ const run = async () => {
   // --- Reset demo tenant ---
   const existing = await Tenant.findOne({ slug: DEMO_SLUG });
   if (existing) {
+    // Session/recovery records point at users that are about to be deleted, so
+    // clear them too — otherwise a re-seed leaves orphaned device rows behind
+    // that would count against the next demo user's concurrent-device limit.
+    const staleUsers = await User.find({ tenantId: existing._id }).select('_id').lean();
+    const staleIds = staleUsers.map((u) => u._id);
+
     await Promise.all([
+      UserSession.deleteMany({ tenantId: existing._id }),
+      PasswordReset.deleteMany({ userId: { $in: staleIds } }),
       User.deleteMany({ tenantId: existing._id }),
       Ticket.deleteMany({ tenantId: existing._id }),
       Comment.deleteMany({ tenantId: existing._id }),
