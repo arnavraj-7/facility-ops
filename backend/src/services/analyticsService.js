@@ -10,14 +10,22 @@ const TERMINAL = ['resolved', 'closed'];
  */
 export const getDashboardStats = async ({ user }) => {
   const match = { tenantId: user.tenantId };
+
+  // A requester sees only their own tickets. An engineer sees their queue —
+  // plus anything they raised themselves, otherwise a ticket they just filed
+  // would vanish from their own dashboard.
   if (user.role === 'user') match.createdBy = user._id;
-  if (user.role === 'engineer') match.assignedEngineer = user._id;
+  if (user.role === 'engineer') {
+    match.$or = [{ assignedEngineer: user._id }, { createdBy: user._id }];
+  }
 
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
+  // Bucket the trend by UTC day so the keys we generate below line up exactly
+  // with what $dateToString produces (it is UTC unless told otherwise).
   const sevenDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
-  sevenDaysAgo.setHours(0, 0, 0, 0);
+  sevenDaysAgo.setUTCHours(0, 0, 0, 0);
 
   const [byStatus, byPriority, byTeam, overdue, resolvedToday, trend, avgResolution, total] =
     await Promise.all([
@@ -62,6 +70,17 @@ export const getDashboardStats = async ({ user }) => {
   const statusMap = toMap(byStatus, TICKET_STATUSES);
   const openCount = total - statusMap.resolved - statusMap.closed;
 
+  // The aggregation only returns days that actually have tickets, which makes
+  // the chart jump from "3 days ago" to "today". Zero-fill so the last 7 days
+  // are always plotted, in order.
+  const counts = Object.fromEntries(trend.map((d) => [d._id, d.created]));
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(sevenDaysAgo);
+    d.setUTCDate(d.getUTCDate() + i);
+    const key = d.toISOString().slice(0, 10);
+    return { date: key, created: counts[key] || 0 };
+  });
+
   return {
     total,
     open: openCount,
@@ -71,6 +90,6 @@ export const getDashboardStats = async ({ user }) => {
     byStatus: statusMap,
     byPriority: toMap(byPriority, TICKET_PRIORITIES),
     byTeam: byTeam.map((t) => ({ team: t._id, count: t.count })),
-    trend: trend.map((d) => ({ date: d._id, created: d.created })),
+    trend: days,
   };
 };

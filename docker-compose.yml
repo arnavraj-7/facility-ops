@@ -1,70 +1,25 @@
-# Facility Ops Hub — full stack.
+# Redis is the ONLY containerised dependency in this project.
 #
-#   docker compose up --build            # core stack (heuristic triage)
-#   docker compose --profile ai up --build   # also start the Gemini AI service
-#   docker compose exec backend npm run seed  # load the demo tenant + tickets
+# Everything else runs natively:
+#   - MongoDB  → MongoDB Atlas (managed, connection string in backend/.env)
+#   - backend  → npm run dev  (Node)
+#   - frontend → npm run dev  (Vite)
+#   - AI       → uvicorn      (optional, only when AI_ENABLED=true)
 #
-# App:  http://localhost:8080   API: http://localhost:9000
+#   docker compose up -d redis     # start it
+#   docker compose down            # stop it
+#
+# Redis itself is optional too: if it is not running, the backend logs a
+# warning and falls back to an in-memory session store, so the app still works.
 services:
-  mongo:
-    image: mongo:7
-    restart: unless-stopped
-    volumes:
-      - mongo_data:/data/db
-    healthcheck:
-      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   redis:
     image: redis:7-alpine
+    container_name: facility-ops-redis
     restart: unless-stopped
+    ports:
+      - '6379:6379'
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
-
-  backend:
-    build: ./backend
-    restart: unless-stopped
-    depends_on:
-      mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      NODE_ENV: production
-      PORT: 9000
-      MONGO_URI: mongodb://mongo:27017/facility_ops
-      REDIS_URL: redis://redis:6379
-      SESSION_SECRET: ${SESSION_SECRET:-change_me_to_a_long_random_string_min_32_chars}
-      COOKIE_SECURE: 'false' # same-origin via nginx over http
-      AI_ENABLED: 'true'
-      AI_MICROSERVICE_URL: http://ai:8000/api/ai
-      CORS_ORIGIN: http://localhost:8080
-    ports:
-      - '9000:9000'
-
-  frontend:
-    build: ./frontend
-    restart: unless-stopped
-    depends_on:
-      - backend
-    ports:
-      - '8080:80'
-
-  # Optional Gemini-powered triage. Heavy build; the backend falls back to a
-  # heuristic router when it is absent. Enable with: --profile ai
-  ai:
-    build:
-      context: .
-      dockerfile: src/ai/Dockerfile
-    restart: unless-stopped
-    profiles: ['ai']
-    environment:
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-
-volumes:
-  mongo_data:

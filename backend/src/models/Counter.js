@@ -17,7 +17,7 @@ counterSchema.statics.next = async function (key) {
   const doc = await this.findByIdAndUpdate(
     key,
     { $inc: { seq: 1 } },
-    { new: true, upsert: true }
+    { returnDocument: 'after', upsert: true }
   );
   return doc.seq;
 };

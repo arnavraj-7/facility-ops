@@ -23,6 +23,23 @@ export function useTickets(filters: TicketFilters) {
   });
 }
 
+/**
+ * The newest tickets visible to the current user, for the dashboard feed.
+ * Uses the same role-scoped /tickets endpoint as the board, so a ticket the
+ * user just raised shows up here immediately.
+ */
+export function useRecentTickets(limit = 6) {
+  return useQuery({
+    queryKey: ['tickets', { recent: true, limit }],
+    queryFn: async () =>
+      (
+        await api.get<Paginated<Ticket>>('/tickets', {
+          params: { limit: String(limit), sort: 'createdAt', order: 'desc' },
+        })
+      ).data,
+  });
+}
+
 export function useTicket(id: string | undefined) {
   return useQuery({
     queryKey: ['ticket', id],

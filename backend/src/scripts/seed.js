@@ -46,7 +46,7 @@ const run = async () => {
   const tenantId = tenant._id;
 
   const mk = (name, email, role, team) =>
-    User.create({ tenantId, name, email, passwordHash: hash, role, team, emailVerifiedAt: new Date() });
+    User.create({ tenantId, name, email, passwordHash: hash, role, team });
 
   const [admin, manager, billy, trini, kim, ranger] = await Promise.all([
     mk('Zordon', 'admin@facility.dev', 'admin'),

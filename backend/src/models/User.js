@@ -20,7 +20,9 @@ const UserSchema = new Schema(
       trim: true,
       match: [/^\S+@\S+\.\S+$/, 'Invalid email'],
     },
-    emailVerifiedAt: { type: Date, default: null },
+    // NOTE: there is intentionally no email-verification state. An account is
+    // usable the moment it is created — either by signup (which provisions a
+    // tenant) or by an admin adding a team member.
 
     passwordHash: {
       type: String,
@@ -55,10 +57,6 @@ const UserSchema = new Schema(
     lockedUntil: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
 
-    // --- 2FA (for future modules) ---
-    totpSecret: { type: String, default: null, select: false },
-    totpEnabledAt: { type: Date, default: null },
-
     deletedAt: { type: Date, default: null, index: true },
   },
   {
@@ -69,8 +67,12 @@ const UserSchema = new Schema(
       transform: (doc, ret) => {
         ret.id = ret._id;
         delete ret._id;
+        // Never let credential material or lockout bookkeeping reach a client.
         delete ret.passwordHash;
-        delete ret.totpSecret;
+        delete ret.failedLoginAttempts;
+        delete ret.lockedUntil;
+        delete ret.isLocked;
+        delete ret.deletedAt;
         return ret;
       },
     },
@@ -84,10 +86,6 @@ UserSchema.index({ tenantId: 1, role: 1, deletedAt: 1 });
 
 UserSchema.virtual('isLocked').get(function () {
   return this.lockedUntil && this.lockedUntil > new Date();
-});
-
-UserSchema.virtual('emailVerified').get(function () {
-  return !!this.emailVerifiedAt;
 });
 
 UserSchema.statics.findActiveByEmail = function (email) {

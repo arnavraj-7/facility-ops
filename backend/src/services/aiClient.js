@@ -1,14 +1,21 @@
 import axios from 'axios';
 import { env } from '../config/env.js';
 import logger from '../lib/logger.js';
+import {
+  TICKET_CATEGORIES,
+  TICKET_PRIORITIES,
+  TEAMS,
+} from '../config/constants.js';
 
 const AI_URL = env.AI_MICROSERVICE_URL;
-const TIMEOUT_MS = 12_000;
+// Short enough that a hung AI service can never make "raise issue" feel broken.
+const TIMEOUT_MS = 6_000;
 
 /**
- * Keyword-based fallback router. Used when AI is disabled or the Python
- * microservice is unreachable, so raising a ticket never hard-fails on an
- * external dependency. Output shape mirrors the AI service's routing object.
+ * Keyword-based triage engine. This is the default router (AI_ENABLED=false)
+ * and also the fallback whenever the Python microservice is unreachable, so
+ * raising a ticket never hard-fails on an external dependency. Output shape
+ * mirrors the AI service's routing object.
  */
 export const heuristicRoute = (description = '') => {
   const text = description.toLowerCase();
@@ -49,12 +56,24 @@ export const heuristicRoute = (description = '') => {
   };
 };
 
-/** Normalize whatever the AI returns into our model's enum casing. */
+/**
+ * Normalize whatever the AI returns into our model's enums. An LLM can always
+ * hallucinate a label outside the schema; clamping here means a bad completion
+ * degrades to a sensible default instead of a Mongoose validation error that
+ * would surface to the user as "could not raise ticket".
+ */
+const oneOf = (allowed, value, fallback) =>
+  allowed.includes(value) ? value : fallback;
+
 const normalizeRouting = (routing = {}) => ({
-  category: routing.category || 'General',
-  priority: String(routing.priority || 'medium').toLowerCase(),
-  summary: routing.summary || '',
-  assigned_team: routing.assigned_team || 'General_Support',
+  category: oneOf(TICKET_CATEGORIES, routing.category, 'General'),
+  priority: oneOf(
+    TICKET_PRIORITIES,
+    String(routing.priority || '').toLowerCase(),
+    'medium'
+  ),
+  summary: String(routing.summary || '').slice(0, 500),
+  assigned_team: oneOf(TEAMS, routing.assigned_team, 'General_Support'),
   requires_hardware_dispatch: !!routing.requires_hardware_dispatch,
 });
 
@@ -65,15 +84,23 @@ const normalizeRouting = (routing = {}) => ({
  *   { status: 'pending_human_approval', routing, threadId, source }
  * Always resolves — callers can rely on getting a routing decision.
  */
-export const dispatchTicket = async ({ ticketId, description }) => {
+export const dispatchTicket = async ({ ticketId, description, title = '' }) => {
+  // Title carries a lot of signal ("coolant leak", "DNS") — triage on both.
+  const text = `${title} ${description}`.trim();
+
   if (!env.AI_ENABLED) {
-    return { status: 'auto_committed', routing: heuristicRoute(description), threadId: null, source: 'ai_disabled' };
+    return {
+      status: 'auto_committed',
+      routing: normalizeRouting(heuristicRoute(text)),
+      threadId: null,
+      source: 'heuristic',
+    };
   }
 
   try {
     const { data } = await axios.post(
       `${AI_URL}/dispatch`,
-      { ticketId, description },
+      { ticketId, description: text },
       { timeout: TIMEOUT_MS }
     );
 
@@ -84,8 +111,13 @@ export const dispatchTicket = async ({ ticketId, description }) => {
     }
     return { status: 'auto_committed', routing, threadId: data.thread_id || null, source: 'ai' };
   } catch (err) {
-    logger.warn(`AI dispatch unavailable, using heuristic fallback: ${err.message}`);
-    return { status: 'auto_committed', routing: heuristicRoute(description), threadId: null, source: 'heuristic_fallback' };
+    logger.warn(`AI dispatch unavailable, using the built-in triage engine: ${err.message}`);
+    return {
+      status: 'auto_committed',
+      routing: normalizeRouting(heuristicRoute(text)),
+      threadId: null,
+      source: 'heuristic_fallback',
+    };
   }
 };
 
