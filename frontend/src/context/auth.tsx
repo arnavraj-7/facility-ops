@@ -49,9 +49,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    await api.post('/auth/logout');
-    qc.clear();
+    // Clear local auth state even if the request fails — someone who clicked
+    // "sign out" must end up signed out, network error or not.
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      /* the cookie is dead either way; fall through and clear locally */
+    }
+
+    // An in-flight /auth/me would otherwise resolve after this and restore the
+    // old user, putting us right back on the dashboard.
+    await qc.cancelQueries({ queryKey: ['me'] });
+
+    // Write the signed-out state onto the query this provider is subscribed
+    // to. Doing qc.clear() here instead removes that query out from under the
+    // live observer, which can leave the provider still rendering the previous
+    // user — and then /login immediately redirects back to /.
     qc.setQueryData(['me'], null);
+
+    // Drop everything else so the next person to log in never sees a flash of
+    // the previous user's tickets.
+    qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'me' });
   };
 
   const value: AuthContextValue = {

@@ -6,15 +6,12 @@
   "type": "module",
   "scripts": {
     "setup": "npm --prefix backend install && npm --prefix frontend install",
-    "dev": "concurrently -n api,web -c cyan,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "dev": "node scripts/dev.mjs",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
     "seed": "npm --prefix backend run seed",
     "build": "npm --prefix frontend run build",
     "redis:up": "docker compose up -d redis",
     "redis:down": "docker compose down"
-  },
-  "devDependencies": {
-    "concurrently": "^9.1.0"
   }
 }
