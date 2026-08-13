@@ -1,14 +1,15 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
-import { AlertTriangle, CheckCircle2, Clock, Inbox, Timer } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, Inbox, Timer } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/page-header';
 import { CreateTicketDialog } from '@/components/create-ticket-dialog';
-import { useDashboard } from '@/hooks/queries';
+import { StatusBadge, PriorityBadge } from '@/components/badges';
+import { useDashboard, useRecentTickets } from '@/hooks/queries';
 import { useAuth } from '@/context/auth';
-import { cn, formatDuration } from '@/lib/utils';
-import type { Priority, TicketStatus } from '@/types';
+import { cn, formatDuration, slaCountdown, timeAgo } from '@/lib/utils';
+import type { Priority, Ticket, TicketStatus, UserRef } from '@/types';
 
 const STATUS_ORDER: TicketStatus[] = [
   'open',
@@ -82,6 +83,88 @@ function Bar({ value, max, className }: { value: number; max: number; className:
   );
 }
 
+/**
+ * The newest tickets the current user can see. Managers/admins get the whole
+ * facility, engineers get their queue, requesters get their own issues — the
+ * list is role-scoped by the API, so whatever you just raised appears at the
+ * top the moment the create dialog closes.
+ */
+function RecentTickets() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { data, isLoading } = useRecentTickets(6);
+  const tickets = data?.tickets ?? [];
+
+  const heading =
+    user?.role === 'user'
+      ? 'Your recent issues'
+      : user?.role === 'engineer'
+        ? 'Your queue'
+        : 'Latest tickets';
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-sm font-medium">{heading}</CardTitle>
+        <Link
+          to="/tickets"
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          View all <ArrowRight className="h-3 w-3" />
+        </Link>
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <div className="space-y-2 p-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
+          </div>
+        ) : tickets.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-12 text-center">
+            <p className="text-sm font-medium">No tickets yet</p>
+            <p className="max-w-xs text-sm text-muted-foreground">
+              Raise the first issue and it will show up here, triaged and routed to a team.
+            </p>
+            <CreateTicketDialog />
+          </div>
+        ) : (
+          <ul className="divide-y">
+            {tickets.map((t: Ticket) => {
+              const engineer = t.assignedEngineer as UserRef | null;
+              const sla = slaCountdown(t.slaDueAt);
+              const terminal = t.status === 'resolved' || t.status === 'closed';
+              return (
+                <li key={t.id}>
+                  <button
+                    onClick={() => navigate(`/tickets/${t.id}`)}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
+                  >
+                    <span className="w-8 shrink-0 font-mono text-xs text-muted-foreground">
+                      #{t.ticketNumber}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{t.title}</span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {engineer ? engineer.name : 'Unassigned'} · {timeAgo(t.createdAt)}
+                        {!terminal && sla.overdue && (
+                          <span className="text-destructive"> · SLA {sla.label}</span>
+                        )}
+                      </span>
+                    </span>
+                    <PriorityBadge priority={t.priority} />
+                    <StatusBadge status={t.status} />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function DashboardPage() {
   const { user } = useAuth();
   const { data, isLoading } = useDashboard();
@@ -125,6 +208,11 @@ export function DashboardPage() {
             />
           </>
         )}
+      </div>
+
+      {/* The feed the whole demo hinges on: raise an issue and watch it land here. */}
+      <div className="mt-4">
+        <RecentTickets />
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -243,11 +331,6 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      <p className="mt-6 text-center text-xs text-muted-foreground">
-        <Link to="/tickets" className="underline-offset-4 hover:underline">
-          View all tickets →
-        </Link>
-      </p>
     </div>
   );
 }

@@ -4,15 +4,21 @@ import app from './app.js';
 import { env } from './config/env.js';
 import { connectDB } from './lib/db.js';
 import { connectRedis, disconnectRedis } from './lib/redis.js';
+import { initSession } from './middlewares/session.js';
 import logger from './lib/logger.js';
 import { startHeartbeat } from './realtime/sse.js';
 import { startSlaWorker } from './workers/slaWorker.js';
 
 const startServer = async () => {
   try {
-    // Wait for the database to connect FIRST
+    // Wait for the database to connect FIRST — this one is not optional.
     await connectDB();
-    await connectRedis();
+
+    // Redis is optional: connectRedis never throws, it reports whether it is
+    // available so the session store can fall back to memory for local demos.
+    const useRedis = await connectRedis();
+    initSession(useRedis);
+
     // Only start the HTTP server if the database connection was successful
     const server = http.createServer(app);
     

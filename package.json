@@ -1,18 +1,20 @@
 {
-  "name": "apex-ai-ops",
+  "name": "facility-ops-hub",
   "version": "1.0.0",
-  "description": "An automated operations platform featuring an autonomous multi-agent workflow orchestrated via LangGraph.js",
+  "private": true,
+  "description": "Zordon's Facility Ops Hub — multi-role facility management platform (React + Express + MongoDB).",
   "type": "module",
-  "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "setup": "npm --prefix backend install && npm --prefix frontend install",
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "seed": "npm --prefix backend run seed",
+    "build": "npm --prefix frontend run build",
+    "redis:up": "docker compose up -d redis",
+    "redis:down": "docker compose down"
   },
-  "dependencies": {
-    "@langchain/core": "^0.3.0",
-    "@langchain/google-genai": "^0.1.2",
-    "@langchain/langgraph": "^0.2.4",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+  "devDependencies": {
+    "concurrently": "^9.1.0"
   }
 }

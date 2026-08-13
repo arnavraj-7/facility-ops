@@ -5,6 +5,7 @@ import Counter from '../models/Counter.js';
 import User from '../models/User.js';
 import AppError from '../utils/AppError.js';
 import { computeSlaDueAt } from '../lib/sla.js';
+import { TICKET_STATUSES, TICKET_PRIORITIES } from '../config/constants.js';
 import { dispatchTicket, resumeTicket } from './aiClient.js';
 import { notifyUser, notifyManagers } from './notificationService.js';
 
@@ -32,11 +33,16 @@ export const createTicket = async ({ user, title, description, priority }) => {
   const tenantId = user.tenantId;
   const ticketNumber = await Counter.next(`ticket:${tenantId}`);
 
-  // Triage through AI (gracefully falls back to a heuristic if AI is down).
-  const ai = await dispatchTicket({ ticketId: ticketNumber, description });
+  // Triage through AI (gracefully falls back to the built-in keyword engine
+  // when the AI service is disabled or unreachable).
+  const ai = await dispatchTicket({ ticketId: ticketNumber, description, title });
+
+  // An explicit user-chosen priority always wins over the triage engine.
   const finalPriority = priority || ai.routing.priority || 'medium';
 
-  const isPending = ai.status === 'pending_human_approval';
+  // Critical work pauses for a manager before it is routed — whether the
+  // pause was decided by the LangGraph interrupt or by the local engine.
+  const isPending = ai.status === 'pending_human_approval' || finalPriority === 'critical';
   const status = isPending ? 'pending_approval' : 'open';
 
   const ticket = await Ticket.create({
@@ -59,7 +65,8 @@ export const createTicket = async ({ user, title, description, priority }) => {
 
   await systemComment(tenantId, ticket._id, `Ticket raised by ${user.name}.`);
 
-  // Stakeholder notifications (best-effort side effects).
+  // Stakeholder notifications (best-effort side effects). The raiser is never
+  // notified about their own ticket.
   if (isPending) {
     await notifyManagers({
       tenantId,
@@ -67,15 +74,17 @@ export const createTicket = async ({ user, title, description, priority }) => {
       title: `Approval required: #${ticketNumber}`,
       body: `Critical ticket "${title}" needs manager review before routing.`,
       ticketId: ticket._id,
-      email: true,
+      alert: true,
+      exceptUserId: user._id,
     });
   } else {
     await notifyManagers({
       tenantId,
       type: 'ticket_created',
       title: `New ticket #${ticketNumber}`,
-      body: `${title} — routed to ${ai.routing.assigned_team}.`,
+      body: `${title} — routed to ${ticket.assignedTeam}.`,
       ticketId: ticket._id,
+      exceptUserId: user._id,
     });
   }
 
@@ -145,6 +154,7 @@ export const getTicket = async ({ user, id }) => {
 // Assign / reassign an engineer (manager/admin)
 // ---------------------------------------------------------------------------
 export const assignEngineer = async ({ user, id, engineerId }) => {
+  if (!mongoose.isValidObjectId(id)) throw AppError.badRequest('Invalid ticket id');
   const ticket = await Ticket.findOne({ _id: id, tenantId: user.tenantId });
   if (!ticket) throw AppError.notFound('Ticket not found');
 
@@ -176,7 +186,7 @@ export const assignEngineer = async ({ user, id, engineerId }) => {
     title: `Assigned to you: #${ticket.ticketNumber}`,
     body: `${ticket.title} (${ticket.priority})`,
     ticketId: ticket._id,
-    email: true,
+    alert: true,
   });
 
   return getTicket({ user, id });
@@ -186,12 +196,31 @@ export const assignEngineer = async ({ user, id, engineerId }) => {
 // Status transition
 // ---------------------------------------------------------------------------
 export const updateStatus = async ({ user, id, status, note }) => {
+  if (!mongoose.isValidObjectId(id)) throw AppError.badRequest('Invalid ticket id');
+
   const ticket = await Ticket.findOne({ _id: id, tenantId: user.tenantId });
   if (!ticket) throw AppError.notFound('Ticket not found');
 
   // Engineers may only move tickets assigned to them.
   if (user.role === 'engineer' && String(ticket.assignedEngineer) !== String(user._id)) {
     throw AppError.forbidden('You can only update tickets assigned to you');
+  }
+
+  // A requester may only act on their own ticket, and only to confirm a fix
+  // (close) or reopen it — they cannot mark their own issue resolved or move
+  // it through the engineering workflow.
+  if (user.role === 'user') {
+    if (String(ticket.createdBy) !== String(user._id)) {
+      throw AppError.forbidden('You can only update tickets you raised');
+    }
+    if (!['closed', 'open'].includes(status)) {
+      throw AppError.forbidden('Requesters may only close or reopen their ticket');
+    }
+  }
+
+  // pending_approval is owned by the approval flow, not by status edits.
+  if (status === 'pending_approval') {
+    throw AppError.badRequest('Use the approval flow to put a ticket back into review');
   }
 
   const from = ticket.status;
@@ -201,11 +230,17 @@ export const updateStatus = async ({ user, id, status, note }) => {
   if (!ticket.firstResponseAt && !['open', 'pending_approval'].includes(status)) {
     ticket.firstResponseAt = new Date();
   }
-  if (status === 'resolved') ticket.resolvedAt = new Date();
-  if (status === 'closed') ticket.closedAt = new Date();
-  if (!TERMINAL.includes(status)) {
-    // reopening clears terminal timestamps
-    ticket.resolvedAt = status === 'resolved' ? ticket.resolvedAt : null;
+  if (status === 'resolved') {
+    ticket.resolvedAt = new Date();
+    ticket.closedAt = null;
+  } else if (status === 'closed') {
+    ticket.closedAt = new Date();
+    // Closing straight from an active state still counts as a resolution.
+    if (!ticket.resolvedAt) ticket.resolvedAt = new Date();
+  } else {
+    // Reopening clears the terminal timestamps so the ticket leaves the
+    // "resolved today" and average-resolution numbers.
+    ticket.resolvedAt = null;
     ticket.closedAt = null;
   }
   ticket.statusHistory.push({ from, to: status, by: user._id, note, at: new Date() });
@@ -230,7 +265,7 @@ export const updateStatus = async ({ user, id, status, note }) => {
         title: `#${ticket.ticketNumber} → ${status}`,
         body: `${ticket.title}`,
         ticketId: ticket._id,
-        email: TERMINAL.includes(status),
+        alert: TERMINAL.includes(status),
       })
     )
   );
@@ -242,10 +277,15 @@ export const updateStatus = async ({ user, id, status, note }) => {
 // Manager approval of an AI-flagged ticket
 // ---------------------------------------------------------------------------
 export const approveTicket = async ({ user, id, isApproved, correctedTeam }) => {
+  if (!mongoose.isValidObjectId(id)) throw AppError.badRequest('Invalid ticket id');
+
   const ticket = await Ticket.findOne({ _id: id, tenantId: user.tenantId });
   if (!ticket) throw AppError.notFound('Ticket not found');
   if (ticket.status !== 'pending_approval') {
     throw AppError.badRequest('Ticket is not awaiting approval');
+  }
+  if (!isApproved && !correctedTeam) {
+    throw AppError.badRequest('Pick a team to re-route to when overriding the AI');
   }
 
   const decision = await resumeTicket(ticket.threadId, { isApproved, correctedTeam });
@@ -288,9 +328,21 @@ export const bulkUpdate = async ({ user, ticketIds, action, value }) => {
   const base = { _id: { $in: ids }, tenantId: user.tenantId };
 
   if (action === 'status') {
+    if (!TICKET_STATUSES.includes(value)) throw AppError.badRequest(`Unknown status: ${value}`);
+
     const set = { status: value };
-    if (value === 'resolved') set.resolvedAt = new Date();
-    if (value === 'closed') set.closedAt = new Date();
+    const now = new Date();
+    if (value === 'resolved') {
+      set.resolvedAt = now;
+      set.closedAt = null;
+    } else if (value === 'closed') {
+      set.closedAt = now;
+    } else {
+      // Reopening must clear the terminal timestamps, otherwise the ticket
+      // stays counted in "resolved today" and avg-resolution forever.
+      set.resolvedAt = null;
+      set.closedAt = null;
+    }
     const res = await Ticket.updateMany(base, {
       $set: set,
       $push: { statusHistory: { to: value, by: user._id, note: 'Bulk update', at: new Date() } },
@@ -299,23 +351,53 @@ export const bulkUpdate = async ({ user, ticketIds, action, value }) => {
   }
 
   if (action === 'priority') {
+    if (!TICKET_PRIORITIES.includes(value)) throw AppError.badRequest(`Unknown priority: ${value}`);
     const res = await Ticket.updateMany(base, { $set: { priority: value } });
     return { matched: res.matchedCount, modified: res.modifiedCount };
   }
 
   if (action === 'assign') {
+    if (!mongoose.isValidObjectId(value)) throw AppError.badRequest('Invalid engineer id');
     const engineer = await User.findOne({
       _id: value,
       tenantId: user.tenantId,
       role: 'engineer',
+      deletedAt: null,
     }).lean();
     if (!engineer) throw AppError.badRequest('Engineer not found in this tenant');
-    const res = await Ticket.updateMany(base, {
-      $set: { assignedEngineer: engineer._id, assignedTeam: engineer.team || null, status: 'assigned' },
-      $push: {
-        statusHistory: { to: 'assigned', by: user._id, note: `Bulk assign to ${engineer.name}`, at: new Date() },
-      },
-    });
+
+    // Assigning must not drag an already-resolved ticket back to "assigned".
+    const res = await Ticket.updateMany(
+      { ...base, status: { $nin: TERMINAL } },
+      {
+        $set: {
+          assignedEngineer: engineer._id,
+          assignedTeam: engineer.team || null,
+          status: 'assigned',
+        },
+        $push: {
+          statusHistory: {
+            to: 'assigned',
+            by: user._id,
+            note: `Bulk assign to ${engineer.name}`,
+            at: new Date(),
+          },
+        },
+      }
+    );
+
+    // One summary notification, not one per ticket — a 50-ticket bulk assign
+    // should not spam the engineer's bell with 50 rows.
+    if (res.modifiedCount > 0) {
+      await notifyUser({
+        tenantId: user.tenantId,
+        userId: engineer._id,
+        type: 'ticket_assigned',
+        title: `${res.modifiedCount} ticket(s) assigned to you`,
+        body: `Bulk-assigned by ${user.name}.`,
+      });
+    }
+
     return { matched: res.matchedCount, modified: res.modifiedCount };
   }
 
